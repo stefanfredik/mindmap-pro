@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { 
   ArrowLeft, Download, Upload, Plus, Minus, Type, Palette, 
   Trash, Save, Layout, ZoomIn, ZoomOut, MousePointer, PaintBucket, X, Check, Network, GitFork, List as ListIcon, Trash2, Tag, Edit, Share2, Globe, Copy, Link as LinkIcon, Lock, UserPlus, Users, Mail,
-  FileJson, Image as ImageIcon, FileText, FileType, ChevronDown
+  FileJson, Image as ImageIcon, FileText, FileType, ChevronDown, Target
 } from 'lucide-react';
 // @ts-ignore
 import html2canvas from 'html2canvas';
@@ -1175,6 +1175,14 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
 
         {/* Zoom Controls */}
         <div className="absolute right-4 bottom-4 z-30 flex bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-1">
+            <button 
+                onClick={() => setViewport({ x: 0, y: 0, scale: 1 })} 
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300"
+                title="Reset View"
+            >
+                <Target size={20} />
+            </button>
+            <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
             <button onClick={() => setViewport(v => ({ ...v, scale: v.scale - 0.1 }))} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300"><Minus size={20} /></button>
             <div className="px-2 py-2 text-sm text-gray-500 font-medium min-w-[3rem] text-center">{Math.round(viewport.scale * 100)}%</div>
             <button onClick={() => setViewport(v => ({ ...v, scale: v.scale + 0.1 }))} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300"><Plus size={20} /></button>

@@ -47,7 +47,9 @@ export const THEMES: MindMapTheme[] = [
     background: '#ffffff',
     lineColor: '#e5e7eb',
     rootStyle: { backgroundColor: '#111827', color: '#ffffff', borderRadius: 50, borderWidth: 0 },
-    nodeStyle: { backgroundColor: '#f3f4f6', color: '#ffffff', borderRadius: 20, borderWidth: 0 },
+    // Fixed: Changed default color from white to dark gray so it's readable if no palette color is applied yet, 
+    // or if the palette color is light. Utils.ts will override this for dark palette colors.
+    nodeStyle: { backgroundColor: '#f3f4f6', color: '#1f2937', borderRadius: 20, borderWidth: 0 },
     palette: ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899']
   },
   {
@@ -77,7 +79,7 @@ export const THEMES: MindMapTheme[] = [
     background: '#fdf6e3',
     lineColor: '#93a1a1',
     rootStyle: { backgroundColor: '#cb4b16', color: '#fdf6e3', borderRadius: 4, borderWidth: 0 },
-    nodeStyle: { backgroundColor: '#eee8d5', color: '#586e75', borderRadius: 2, borderWidth: 2, borderColor: '#93a1a1' },
+    nodeStyle: { backgroundColor: '#eee8d5', color: '#43555c', borderRadius: 2, borderWidth: 2, borderColor: '#93a1a1' },
     palette: ['#b58900', '#cb4b16', '#dc322f', '#d33682', '#6c71c4', '#268bd2']
   },
   {
@@ -97,7 +99,8 @@ export const THEMES: MindMapTheme[] = [
     background: '#14251F',
     lineColor: '#4b5f54',
     rootStyle: { backgroundColor: '#8CAE68', color: '#0F2119', borderRadius: 20, borderWidth: 0 },
-    nodeStyle: { backgroundColor: '#3A5A40', color: '#DAD7CD', borderRadius: 10, borderWidth: 0 },
+    // Fixed: Changed text color to white for better contrast on dark green
+    nodeStyle: { backgroundColor: '#3A5A40', color: '#FFFFFF', borderRadius: 10, borderWidth: 0 },
     palette: ['#8CAE68', '#A3B18A', '#588157', '#3A5A40', '#344E41']
   },
   {

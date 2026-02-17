@@ -173,6 +173,23 @@ export const getCrossLinkPath = (
     return { path, center: { x: mx, y: my } };
 };
 
+// Helper to determine text color (black or white) based on background hex
+const getLegibleTextColor = (hex: string): string => {
+    // Remove hash if present
+    const cleanHex = hex.replace('#', '');
+    
+    // Parse RGB
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    
+    // Calculate relative luminance (YIQ formula)
+    const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+    
+    // Threshold of 128 is standard; if brighter than 128, use dark text.
+    return (yiq >= 128) ? '#1f2937' : '#ffffff';
+};
+
 export const applyTheme = (nodes: MindMapNode[], theme: MindMapTheme): MindMapNode[] => {
   const newNodes = nodes.map(n => ({ ...n })); 
   const nodeMap = new Map(newNodes.map(n => [n.id, n]));
@@ -189,6 +206,11 @@ export const applyTheme = (nodes: MindMapNode[], theme: MindMapTheme): MindMapNo
   if (!root) return newNodes;
 
   root.style = { ...DEFAULT_NODE_STYLE, ...theme.rootStyle };
+  // Ensure root text is legible if type is fill and color isn't explicitly contrasted (safety check)
+  if (theme.type === 'fill' && theme.rootStyle.backgroundColor) {
+      // We respect the theme definition for root, but could override if needed. 
+      // Usually constants.ts has good root pairs.
+  }
 
   const level1Ids = childrenMap.get(root.id) || [];
   
@@ -201,6 +223,8 @@ export const applyTheme = (nodes: MindMapNode[], theme: MindMapTheme): MindMapNo
             branchStyle.borderColor = color;
         } else {
             branchStyle.backgroundColor = color;
+            // Automatically calculate legible text color for filled nodes
+            branchStyle.color = getLegibleTextColor(color);
         }
         node.style = branchStyle;
 
@@ -217,6 +241,8 @@ export const applyTheme = (nodes: MindMapNode[], theme: MindMapTheme): MindMapNo
                         childStyle.borderColor = color;
                     } else {
                         childStyle.backgroundColor = color;
+                        // Automatically calculate legible text color for filled nodes
+                        childStyle.color = getLegibleTextColor(color);
                     }
                     childNode.style = childStyle;
                     queue.push(childId);
