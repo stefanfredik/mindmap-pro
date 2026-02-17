@@ -1,0 +1,5 @@
+{
+  "name": "MindMap Pro",
+  "description": "A collaborative web-based mind mapping application featuring real-time visualization, node management, and export capabilities as defined in the SRS.",
+  "requestFramePermissions": []
+}
