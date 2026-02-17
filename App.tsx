@@ -49,6 +49,11 @@ const App: React.FC = () => {
     setCurrentPage(Page.DASHBOARD);
   };
 
+  const handleLogout = () => {
+    setCurrentPage(Page.LANDING);
+    setCurrentMapId(null);
+  };
+
   const handleCreateMap = () => {
     const defaultTheme = THEMES.find(t => t.id === DEFAULT_THEME_ID) || THEMES[0];
     const rootId = generateId();
@@ -111,6 +116,9 @@ const App: React.FC = () => {
             onCreate={handleCreateMap}
             onOpen={handleOpenMap}
             onDelete={handleDeleteMap}
+            onLogout={handleLogout}
+            theme={theme}
+            toggleTheme={toggleTheme}
           />
         );
       case Page.EDITOR:
@@ -131,7 +139,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
       {/* Global Theme Toggle (Absolute top-right, except in Editor which has its own layout) */}
-      {currentPage !== Page.EDITOR && (
+      {currentPage !== Page.EDITOR && currentPage !== Page.DASHBOARD && (
         <button
           onClick={toggleTheme}
           className="fixed top-6 right-6 z-50 p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg text-gray-600 dark:text-yellow-400 hover:scale-110 transition-transform"
