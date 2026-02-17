@@ -14,7 +14,7 @@ interface NodeComponentProps {
   onDragStart: (e: React.MouseEvent, id: string) => void;
   onUpdate: (id: string, content: string) => void;
   onToggleExpand: (id: string) => void;
-  onAddChild: (id: string) => void;
+  onAddChild: (id: string, side?: 'left' | 'right') => void;
   onHover: (id: string | null) => void;
   onStartConnect: (e: React.MouseEvent, id: string) => void; // New prop to start connection from handles
 }
@@ -105,6 +105,8 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
     </div>
   );
 
+  const isRoot = !node.parentId;
+
   return (
     <div
       ref={nodeRef}
@@ -193,15 +195,38 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
         </>
       )}
 
-      {/* Quick Add Child Button (Only if NOT connecting and handles NOT shown) */}
+      {/* Add Child Buttons */}
       {isSelected && !isConnecting && !showHandles && (
-        <button 
-            className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
-            onClick={handleAddChild}
-            title="Add Child Node"
-        >
-            <Plus size={14} strokeWidth={3} />
-        </button>
+        <>
+            {isRoot ? (
+                // Root Node: Show Left and Right Add Buttons
+                <>
+                    <button 
+                        className="absolute top-1/2 -right-8 transform -translate-y-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
+                        onClick={(e) => { e.stopPropagation(); onAddChild(node.id, 'right'); }}
+                        title="Add Child (Right)"
+                    >
+                        <Plus size={14} strokeWidth={3} />
+                    </button>
+                    <button 
+                        className="absolute top-1/2 -left-8 transform -translate-y-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
+                        onClick={(e) => { e.stopPropagation(); onAddChild(node.id, 'left'); }}
+                        title="Add Child (Left)"
+                    >
+                        <Plus size={14} strokeWidth={3} />
+                    </button>
+                </>
+            ) : (
+                // Normal Node: Show Bottom Add Button
+                <button 
+                    className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
+                    onClick={handleAddChild}
+                    title="Add Child Node"
+                >
+                    <Plus size={14} strokeWidth={3} />
+                </button>
+            )}
+        </>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 
+
 import { MindMapNode, Position, MindMapTheme, LayoutType, MindMapData } from './types';
 import { DEFAULT_NODE_STYLE } from './constants';
 
@@ -66,17 +67,28 @@ export const getConnectionPath = (
     return { path, center: { x: mx, y: my } };
   }
   
-  // Default: Mind Map (Left-Right)
-  // Parent Right -> Child Left
-  sx = source.position.x + sw / 2;
-  sy = source.position.y;
-  ex = target.position.x - tw / 2;
-  ey = target.position.y;
+  // Default: Mind Map (Left-Right OR Right-Left)
+  // Determine direction based on relative position
+  const isTargetLeft = target.position.x < source.position.x;
+
+  if (isTargetLeft) {
+      // Parent Left -> Child Right
+      sx = source.position.x - sw / 2;
+      sy = source.position.y;
+      ex = target.position.x + tw / 2;
+      ey = target.position.y;
+  } else {
+      // Parent Right -> Child Left
+      sx = source.position.x + sw / 2;
+      sy = source.position.y;
+      ex = target.position.x - tw / 2;
+      ey = target.position.y;
+  }
 
   const dist = Math.abs(ex - sx);
   // Control points
-  const cp1x = sx + dist * 0.4;
-  const cp2x = ex - dist * 0.4;
+  const cp1x = isTargetLeft ? sx - dist * 0.4 : sx + dist * 0.4;
+  const cp2x = isTargetLeft ? ex + dist * 0.4 : ex - dist * 0.4;
 
   const path = `M ${sx} ${sy} C ${cp1x} ${sy} ${cp2x} ${ey} ${ex} ${ey}`;
 
@@ -326,12 +338,12 @@ const buildTree = (nodes: MindMapNode[]) => {
   return { nodeMap, childrenMap, roots };
 };
 
-// 1. Mind Map (Horizontal Tree)
+// 1. Mind Map (Horizontal Tree with Left/Right Distribution)
 const layoutMindMap = (nodes: MindMapNode[]): MindMapNode[] => {
   if (nodes.length === 0) return nodes;
   const { nodeMap, childrenMap, roots } = buildTree(nodes);
 
-  const HORIZONTAL_GAP = 50;
+  const HORIZONTAL_GAP = 60;
   const VERTICAL_GAP = 20;
 
   // Calculate subtree sizes (height is dominant for horizontal layout)
@@ -360,7 +372,7 @@ const layoutMindMap = (nodes: MindMapNode[]): MindMapNode[] => {
     return h;
   };
 
-  const layoutRecursive = (nodeId: string, x: number, yCenter: number) => {
+  const layoutRecursive = (nodeId: string, x: number, yCenter: number, direction: 1 | -1) => {
     const node = nodeMap.get(nodeId)!;
     const children = childrenMap.get(nodeId) || [];
     
@@ -368,7 +380,6 @@ const layoutMindMap = (nodes: MindMapNode[]): MindMapNode[] => {
 
     if (node.isExpanded !== false && children.length > 0) {
       let currentY = yCenter - (subtreeSizes.get(nodeId)! / 2); // Start at top of subtree area
-      // Center the children block relative to the parent center.
       
       const childrenBlockHeight = children.reduce((acc, cid) => acc + (subtreeSizes.get(cid) || 0), 0) + (children.length - 1) * VERTICAL_GAP;
       let childStartY = yCenter - childrenBlockHeight / 2;
@@ -376,12 +387,15 @@ const layoutMindMap = (nodes: MindMapNode[]): MindMapNode[] => {
       children.forEach(childId => {
         const h = subtreeSizes.get(childId)!;
         const childCenter = childStartY + h / 2;
-        // X position: Parent X + Parent Width/2 + Gap + Child Width/2
-        // Since anchor is center, we add half widths.
-        const childNode = nodeMap.get(childId)!;
-        const nextX = x + (node.width! / 2) + HORIZONTAL_GAP + (childNode.width! / 2);
         
-        layoutRecursive(childId, nextX, childCenter);
+        const childNode = nodeMap.get(childId)!;
+        
+        // Direction determines if we add or subtract X
+        // Distance = ParentHalfWidth + Gap + ChildHalfWidth
+        const distance = (node.width! / 2) + HORIZONTAL_GAP + (childNode.width! / 2);
+        const nextX = x + (distance * direction);
+        
+        layoutRecursive(childId, nextX, childCenter, direction);
         childStartY += h + VERTICAL_GAP;
       });
     }
@@ -389,9 +403,67 @@ const layoutMindMap = (nodes: MindMapNode[]): MindMapNode[] => {
 
   if (roots.length > 0) {
     const root = roots[0];
+    
+    // Calculate sizes for the whole tree first to ensure data exists
     calculateSubtreeHeight(root.id);
-    // Keep root at its current position approx or center?
-    layoutRecursive(root.id, root.position.x, root.position.y);
+    
+    // Split Level 1 children into Left and Right based on layoutSide property or fallback to index
+    const level1ChildrenIds = childrenMap.get(root.id) || [];
+    
+    // Convert IDs to Nodes to access layoutSide and other properties safely
+    const level1Nodes = level1ChildrenIds.map(id => nodeMap.get(id)).filter((n): n is MindMapNode => !!n);
+
+    const rightChildren = level1Nodes.filter((n, i) => {
+        if (n.layoutSide === 'right') return true;
+        if (n.layoutSide === 'left') return false;
+        return i % 2 === 0; // Default fallback
+    });
+    
+    const leftChildren = level1Nodes.filter((n, i) => {
+        if (n.layoutSide === 'left') return true;
+        if (n.layoutSide === 'right') return false;
+        return i % 2 !== 0; // Default fallback
+    });
+
+    // Layout Root
+    root.position = { x: root.position.x, y: root.position.y }; // Keep root where it is
+
+    // Layout Right Side
+    if (rightChildren.length > 0) {
+        // Recalculate block height for just this side
+        const rightBlockHeight = rightChildren.reduce((acc, childNode) => acc + (subtreeSizes.get(childNode.id) || 0), 0) + (rightChildren.length - 1) * VERTICAL_GAP;
+        let startY = root.position.y - rightBlockHeight / 2;
+        
+        rightChildren.forEach(childNode => {
+             const childId = childNode.id;
+             const h = subtreeSizes.get(childId)!;
+             const childCenter = startY + h / 2;
+             
+             const distance = (root.width! / 2) + HORIZONTAL_GAP + (childNode.width! / 2);
+             const nextX = root.position.x + distance;
+
+             layoutRecursive(childId, nextX, childCenter, 1); // 1 = Right
+             startY += h + VERTICAL_GAP;
+        });
+    }
+
+    // Layout Left Side
+    if (leftChildren.length > 0) {
+        const leftBlockHeight = leftChildren.reduce((acc, childNode) => acc + (subtreeSizes.get(childNode.id) || 0), 0) + (leftChildren.length - 1) * VERTICAL_GAP;
+        let startY = root.position.y - leftBlockHeight / 2;
+        
+        leftChildren.forEach(childNode => {
+             const childId = childNode.id;
+             const h = subtreeSizes.get(childId)!;
+             const childCenter = startY + h / 2;
+             
+             const distance = (root.width! / 2) + HORIZONTAL_GAP + (childNode.width! / 2);
+             const nextX = root.position.x - distance; // Subtract distance for left
+
+             layoutRecursive(childId, nextX, childCenter, -1); // -1 = Left
+             startY += h + VERTICAL_GAP;
+        });
+    }
   }
 
   return Array.from(nodeMap.values());

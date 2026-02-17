@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { 
   ArrowLeft, Download, Upload, Plus, Minus, Type, Palette, 
@@ -191,6 +192,38 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
   };
 
   const handleMouseUp = () => {
+    // Handle Node Drag Drop - Side Switching Logic
+    if (isDraggingNode && draggedNodeId && currentLayout === 'mindmap') {
+        const draggedNode = nodes.find(n => n.id === draggedNodeId);
+        const rootNode = nodes.find(n => !n.parentId);
+        
+        // Only apply side switching logic if:
+        // 1. We found the dragged node
+        // 2. We found the root node
+        // 3. The dragged node is a direct child of the root node (Level 1)
+        if (draggedNode && rootNode && draggedNode.parentId === rootNode.id) {
+             const side: 'left' | 'right' = draggedNode.position.x < rootNode.position.x ? 'left' : 'right';
+             
+             // If side has changed, update it and re-layout
+             if (draggedNode.layoutSide !== side) {
+                 setNodes(prev => {
+                     const updated = prev.map(n => n.id === draggedNodeId ? { ...n, layoutSide: side } : n);
+                     return autoLayout(updated, currentLayout);
+                 });
+             } else {
+                 // Even if side didn't change, we should snap back to auto layout to clean up alignment
+                 setNodes(prev => autoLayout(prev, currentLayout));
+             }
+        } else {
+             // For all other nodes, just snap back to layout
+             setNodes(prev => autoLayout(prev, currentLayout));
+        }
+    } else if (isDraggingNode) {
+        // Snap back for other layouts too
+        setNodes(prev => autoLayout(prev, currentLayout));
+    }
+
+
     if (connectionDrag) {
         if (hoveredNodeId && hoveredNodeId !== connectionDrag.sourceId) {
              const exists = connections.some(c => 
@@ -307,7 +340,7 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     setSelectedConnectionId(null);
   };
 
-  const addNode = useCallback((parentIdOverride?: string) => {
+  const addNode = useCallback((parentIdOverride?: string, side?: 'left' | 'right') => {
     const parentId = parentIdOverride || selectedNodeId;
     const newId = generateId();
     
@@ -341,7 +374,8 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
           content: "Child Node",
           position: { x: parent.position.x + 50, y: parent.position.y + 50 }, 
           style: { ...DEFAULT_NODE_STYLE, ...currentTheme.nodeStyle },
-          isExpanded: true
+          isExpanded: true,
+          layoutSide: side // Store preferred side
         };
 
         const newNodesWithNode = [...updatedNodes, newNode];
@@ -368,7 +402,8 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
         content: "Sibling Node",
         position: { x: selectedNode.position.x, y: selectedNode.position.y },
         style: { ...DEFAULT_NODE_STYLE, ...currentTheme.nodeStyle },
-        isExpanded: true
+        isExpanded: true,
+        layoutSide: selectedNode.layoutSide // Inherit side from sibling
       };
       
       const themedNodes = applyTheme([...prev, newNode], currentTheme);
@@ -472,8 +507,8 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
       title: title, 
       nodes: nodes,
       connections: connections,
-      themeId: currentThemeId,
-      layout: currentLayout,
+      themeId: currentThemeId, 
+      layout: currentLayout, 
       isPublic: isPublic,
       collaborators: collaborators,
       updatedAt: new Date().toISOString()

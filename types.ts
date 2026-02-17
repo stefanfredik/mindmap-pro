@@ -34,6 +34,7 @@ export interface MindMapNode {
   isExpanded?: boolean;
   width?: number;
   height?: number;
+  layoutSide?: 'left' | 'right'; // Added for manual side preference
 }
 
 export interface MindMapConnection {
