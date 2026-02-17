@@ -1,5 +1,5 @@
 
-import { MindMapNode, Position, MindMapTheme, LayoutType } from './types';
+import { MindMapNode, Position, MindMapTheme, LayoutType, MindMapData } from './types';
 import { DEFAULT_NODE_STYLE } from './constants';
 
 export const generateId = (): string => {
@@ -503,13 +503,64 @@ export const autoLayout = (nodes: MindMapNode[], type: LayoutType = 'mindmap'): 
   }
 };
 
+export const triggerDownload = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(href);
+};
+
 export const downloadJson = (data: object, filename: string) => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+    triggerDownload(JSON.stringify(data, null, 2), filename, 'application/json');
+};
+
+export const generateMarkdown = (data: MindMapData): string => {
+    const { nodes, title } = data;
+    const { childrenMap, roots } = buildTree(nodes);
+    let md = `# ${title}\n\n`;
+
+    const traverse = (nodeId: string, depth: number) => {
+        const node = nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const indent = '  '.repeat(depth);
+        const bullet = depth === 0 ? '##' : '-';
+        md += `${indent}${bullet} ${node.content}\n`;
+        
+        if (node.note) {
+             // Basic HTML to Markdown strip could happen here, but simplest is just appending
+             md += `${indent}  > Note: ${node.note.replace(/<[^>]*>?/gm, '')}\n`;
+        }
+
+        const children = childrenMap.get(nodeId) || [];
+        children.forEach(childId => traverse(childId, depth + (depth === 0 ? 0 : 1)));
+    };
+
+    roots.forEach(root => traverse(root.id, 0));
+    return md;
+};
+
+export const generatePlainText = (data: MindMapData): string => {
+    const { nodes, title } = data;
+    const { childrenMap, roots } = buildTree(nodes);
+    let text = `${title}\n${'='.repeat(title.length)}\n\n`;
+
+    const traverse = (nodeId: string, depth: number) => {
+        const node = nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const indent = '\t'.repeat(depth);
+        text += `${indent}${node.content}\n`;
+        
+        const children = childrenMap.get(nodeId) || [];
+        children.forEach(childId => traverse(childId, depth + 1));
+    };
+
+    roots.forEach(root => traverse(root.id, 0));
+    return text;
 };

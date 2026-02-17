@@ -170,6 +170,8 @@ export const SAMPLE_MINDMAP: MindMapData = {
   description: "Initial brainstorming for Q3 goals",
   themeId: 'meister',
   layout: 'mindmap',
+  isPublic: false,
+  collaborators: [],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   nodes: [

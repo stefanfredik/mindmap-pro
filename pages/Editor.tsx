@@ -2,13 +2,20 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { 
   ArrowLeft, Download, Upload, Plus, Minus, Type, Palette, 
-  Trash, Save, Layout, ZoomIn, ZoomOut, MousePointer, PaintBucket, X, Check, Network, GitFork, List as ListIcon, Trash2, Tag, Edit
+  Trash, Save, Layout, ZoomIn, ZoomOut, MousePointer, PaintBucket, X, Check, Network, GitFork, List as ListIcon, Trash2, Tag, Edit, Share2, Globe, Copy, Link as LinkIcon, Lock, UserPlus, Users, Mail,
+  FileJson, Image as ImageIcon, FileText, FileType, ChevronDown
 } from 'lucide-react';
+// @ts-ignore
+import html2canvas from 'html2canvas';
+
 import { MindMapData, MindMapNode, Position, Viewport, NodeStyle, LayoutType, MindMapConnection } from '../types';
 import { NodeComponent } from '../components/NodeComponent';
 import { NodeToolbar } from '../components/NodeToolbar';
 import { RichTextEditor } from '../components/RichTextEditor';
-import { generateId, getConnectionPath, getCrossLinkPath, autoLayout, downloadJson, applyTheme } from '../utils';
+import { 
+    generateId, getConnectionPath, getCrossLinkPath, autoLayout, 
+    downloadJson, applyTheme, generateMarkdown, generatePlainText, triggerDownload 
+} from '../utils';
 import { DEFAULT_NODE_STYLE, THEMES, DEFAULT_THEME_ID } from '../constants';
 
 interface EditorProps {
@@ -65,9 +72,15 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
   const [dragStart, setDragStart] = useState<Position>({ x: 0, y: 0 });
   const [showThemeSelector, setShowThemeSelector] = useState(false);
   const [showLayoutSelector, setShowLayoutSelector] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [currentThemeId, setCurrentThemeId] = useState<string>(data.themeId || DEFAULT_THEME_ID);
   const [currentLayout, setCurrentLayout] = useState<LayoutType>(data.layout || 'mindmap');
   const [editingNoteNodeId, setEditingNoteNodeId] = useState<string | null>(null);
+  const [isPublic, setIsPublic] = useState(data.isPublic || false);
+  const [collaborators, setCollaborators] = useState<string[]>(data.collaborators || []);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   // Connection State
   const [connectingNodeId, setConnectingNodeId] = useState<string | null>(null);
@@ -439,18 +452,84 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     setNodes(prev => autoLayout(prev, currentLayout));
   };
 
-  const handleExport = () => {
-    const exportData: MindMapData = {
-        ...data,
-        title: title, // Use current title
-        nodes: nodes,
-        connections: connections,
-        themeId: currentThemeId,
-        layout: currentLayout,
-        updatedAt: new Date().toISOString()
-    };
-    downloadJson(exportData, `${title.replace(/\s+/g, '_')}.json`);
+  const handleSave = () => {
+     onSave({
+         ...data, 
+         title, 
+         nodes, 
+         connections, 
+         themeId: currentThemeId, 
+         layout: currentLayout, 
+         isPublic,
+         collaborators,
+         updatedAt: new Date().toISOString()
+     });
   };
+
+  // Export Logic
+  const getCurrentMapData = (): MindMapData => ({
+      ...data,
+      title: title, 
+      nodes: nodes,
+      connections: connections,
+      themeId: currentThemeId,
+      layout: currentLayout,
+      isPublic: isPublic,
+      collaborators: collaborators,
+      updatedAt: new Date().toISOString()
+  });
+
+  const handleExportJson = () => {
+    downloadJson(getCurrentMapData(), `${title.replace(/\s+/g, '_')}.json`);
+    setShowExportModal(false);
+  };
+
+  const handleExportMarkdown = () => {
+      const md = generateMarkdown(getCurrentMapData());
+      triggerDownload(md, `${title.replace(/\s+/g, '_')}.md`, 'text/markdown');
+      setShowExportModal(false);
+  };
+
+  const handleExportText = () => {
+      const text = generatePlainText(getCurrentMapData());
+      triggerDownload(text, `${title.replace(/\s+/g, '_')}.txt`, 'text/plain');
+      setShowExportModal(false);
+  };
+
+  const handleExportImage = async () => {
+      setIsExporting(true);
+      try {
+          // Deselect everything for a clean shot
+          setSelectedNodeId(null);
+          setSelectedConnectionId(null);
+          
+          // Wait for render cycle
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          const element = document.getElementById('canvas-bg');
+          if (element) {
+              const canvas = await html2canvas(element, {
+                  scale: 2, // Better quality
+                  useCORS: true,
+                  backgroundColor: currentTheme.background.startsWith('#') ? currentTheme.background : '#ffffff', // Fallback for complex gradients if needed
+                  ignoreElements: (element) => element.classList.contains('node-toolbar') || element.classList.contains('rich-text-editor-container')
+              });
+              
+              const image = canvas.toDataURL("image/png");
+              const link = document.createElement('a');
+              link.href = image;
+              link.download = `${title.replace(/\s+/g, '_')}.png`;
+              link.click();
+          }
+      } catch (err) {
+          console.error("Export failed", err);
+          alert("Failed to export image.");
+      } finally {
+          setIsExporting(false);
+          setShowExportModal(false);
+      }
+  };
+
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -465,6 +544,8 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
           if (json.connections) setConnections(json.connections);
           if (json.themeId) setCurrentThemeId(json.themeId);
           if (json.layout) setCurrentLayout(json.layout);
+          if (json.isPublic !== undefined) setIsPublic(json.isPublic);
+          if (json.collaborators) setCollaborators(json.collaborators);
         }
       } catch (err) {
         alert("Invalid JSON file");
@@ -472,6 +553,31 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+  // Share Functionality
+  const handleTogglePublic = () => {
+    setIsPublic(!isPublic);
+  };
+
+  const copyToClipboard = () => {
+    const url = `${window.location.origin}/view/${data.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+        alert("Link copied to clipboard!");
+    });
+  };
+
+  // Collaboration Logic
+  const handleInvite = () => {
+      if (!inviteEmail || !inviteEmail.includes('@')) return;
+      if (!collaborators.includes(inviteEmail)) {
+          setCollaborators(prev => [...prev, inviteEmail]);
+          setInviteEmail('');
+      }
+  };
+
+  const handleRemoveCollaborator = (email: string) => {
+      setCollaborators(prev => prev.filter(c => c !== email));
   };
 
   useEffect(() => {
@@ -501,6 +607,8 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
           setSelectedConnectionId(null);
           setConnectionDrag(null);
           setIsEditingTitle(false);
+          setShowShareModal(false);
+          setShowExportModal(false);
       }
     };
 
@@ -784,23 +892,209 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
                 )}
             </div>
 
+            <button 
+                onClick={() => setShowShareModal(true)} 
+                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${isPublic || collaborators.length > 0 ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
+                title="Share Project"
+            >
+                <Share2 size={20} />
+                <span className="hidden sm:inline text-sm font-medium">Share</span>
+            </button>
+
             <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
             <label className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg cursor-pointer text-gray-600 dark:text-gray-300" title="Import JSON">
                 <Upload size={20} />
                 <input type="file" accept=".json" className="hidden" onChange={handleImport} />
             </label>
-            <button onClick={handleExport} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300" title="Export JSON">
-                <Download size={20} />
-            </button>
+            
+            {/* Export Button & Menu */}
+            <div className="relative">
+                <button 
+                    onClick={() => setShowExportModal(!showExportModal)}
+                    className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${showExportModal ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'}`}
+                    title="Export"
+                >
+                    <Download size={20} />
+                </button>
+                {/* Export Modal/Dropdown */}
+                {showExportModal && (
+                    <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden z-50 flex flex-col animate-in fade-in slide-in-from-top-2">
+                         <div className="p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Export As</h4>
+                         </div>
+                         <div className="p-2 flex flex-col gap-1">
+                             <button onClick={handleExportJson} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-left transition-colors">
+                                 <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400 flex items-center justify-center"><FileJson size={18} /></div>
+                                 <div className="flex-grow"><span className="text-sm font-medium text-gray-800 dark:text-gray-200 block">JSON</span><span className="text-xs text-gray-500">Backup file</span></div>
+                             </button>
+                             <button onClick={handleExportImage} disabled={isExporting} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-left transition-colors disabled:opacity-50">
+                                 <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center"><ImageIcon size={18} /></div>
+                                 <div className="flex-grow"><span className="text-sm font-medium text-gray-800 dark:text-gray-200 block">Image (PNG)</span><span className="text-xs text-gray-500">Visual snapshot</span></div>
+                             </button>
+                             <button onClick={handleExportMarkdown} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-left transition-colors">
+                                 <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 flex items-center justify-center"><FileType size={18} /></div>
+                                 <div className="flex-grow"><span className="text-sm font-medium text-gray-800 dark:text-gray-200 block">Markdown</span><span className="text-xs text-gray-500">Document outline</span></div>
+                             </button>
+                             <button onClick={handleExportText} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-left transition-colors">
+                                 <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 flex items-center justify-center"><FileText size={18} /></div>
+                                 <div className="flex-grow"><span className="text-sm font-medium text-gray-800 dark:text-gray-200 block">Plain Text</span><span className="text-xs text-gray-500">Simple list</span></div>
+                             </button>
+                         </div>
+                    </div>
+                )}
+            </div>
+
             <button 
-                onClick={() => onSave({...data, title, nodes, connections, themeId: currentThemeId, layout: currentLayout, updatedAt: new Date().toISOString()})} 
+                onClick={handleSave} 
                 className="bg-primary hover:bg-blue-600 text-white px-4 py-1.5 rounded-lg flex items-center gap-2 text-sm font-medium ml-2"
             >
                 <Save size={16} /> Save
             </button>
         </div>
       </header>
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-6 m-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Share2 className="text-blue-500" /> Share Project
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage access to this mind map</p>
+              </div>
+              <button onClick={() => setShowShareModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Public Access Section */}
+            <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isPublic ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
+                    {isPublic ? <Globe size={20} /> : <Lock size={20} />}
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-gray-900 dark:text-white">Public Access</h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {isPublic ? 'Anyone with the link can view' : 'Only you can access this map'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleTogglePublic}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isPublic ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPublic ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+
+              {isPublic && (
+                <div className="mt-4 animate-in slide-in-from-top-2 fade-in duration-300">
+                  <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Public Link</label>
+                  <div className="flex gap-2">
+                    <div className="flex-grow bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-600 dark:text-gray-300 truncate select-all font-mono">
+                      {`${window.location.origin}/view/${data.id}`}
+                    </div>
+                    <button 
+                      onClick={copyToClipboard}
+                      className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-2"
+                      title="Copy Link"
+                    >
+                      <Copy size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Collaboration Section */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl mb-4 border border-gray-100 dark:border-gray-700">
+              <div className="p-4 border-b border-gray-100 dark:border-gray-700">
+                  <h4 className="font-medium text-gray-900 dark:text-white flex items-center gap-2 mb-3">
+                      <Users size={16} className="text-blue-500" /> Collaboration
+                  </h4>
+                  <div className="flex gap-2">
+                      <div className="relative flex-grow">
+                          <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input 
+                              type="email" 
+                              placeholder="Enter email to invite..." 
+                              value={inviteEmail}
+                              onChange={(e) => setInviteEmail(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
+                              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-gray-200"
+                          />
+                      </div>
+                      <button 
+                          onClick={handleInvite}
+                          disabled={!inviteEmail.includes('@')}
+                          className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                      >
+                          <UserPlus size={16} /> Invite
+                      </button>
+                  </div>
+              </div>
+              <div className="max-h-48 overflow-y-auto p-2">
+                  <div className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                      <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xs font-bold border border-blue-200 dark:border-blue-800">
+                              YO
+                          </div>
+                          <div>
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">You (Owner)</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">admin@mindmap.pro</p>
+                          </div>
+                      </div>
+                      <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded">Owner</span>
+                  </div>
+                  
+                  {collaborators.map((email) => (
+                      <div key={email} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors group">
+                          <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xs font-bold border border-purple-200 dark:border-purple-800 uppercase">
+                                  {email.substring(0, 2)}
+                              </div>
+                              <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate max-w-[180px]" title={email}>{email}</p>
+                          </div>
+                          <button 
+                              onClick={() => handleRemoveCollaborator(email)}
+                              className="text-gray-400 hover:text-red-500 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Remove access"
+                          >
+                              <X size={16} />
+                          </button>
+                      </div>
+                  ))}
+                  
+                  {collaborators.length === 0 && (
+                      <div className="text-center py-4 text-xs text-gray-400">
+                          No collaborators yet. Invite someone above!
+                      </div>
+                  )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setShowShareModal(false)}
+                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg font-medium transition-colors"
+              >
+                Close
+              </button>
+              <button 
+                onClick={() => { handleSave(); setShowShareModal(false); }}
+                className="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-sm"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-grow relative overflow-hidden">
         {/* Connecting Mode Indicator */}

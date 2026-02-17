@@ -53,6 +53,8 @@ export interface MindMapData {
   connections: MindMapConnection[];
   themeId: string;
   layout?: LayoutType;
+  isPublic?: boolean; // Added for sharing capability
+  collaborators?: string[]; // Added for email collaboration
   createdAt: string;
   updatedAt: string;
 }
