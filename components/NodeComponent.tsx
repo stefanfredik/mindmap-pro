@@ -106,6 +106,8 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
   );
 
   const isRoot = !node.parentId;
+  // Determine if node is on the left side of the tree
+  const isLeft = node.layoutSide === 'left';
 
   return (
     <div
@@ -133,8 +135,9 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
     >
+      {/* Drag Grip - Swaps side based on layout */}
       <div 
-        className="cursor-move p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity absolute -left-6"
+        className={`cursor-move p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity absolute ${isLeft ? '-right-6' : '-left-6'}`}
         onMouseDown={(e) => onDragStart(e, node.id)}
       >
         <GripVertical size={16} />
@@ -175,10 +178,11 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
         )}
       </div>
 
+      {/* Collapse/Expand Button - Position depends on layoutSide */}
       {hasChildren && (
         <button
           onClick={handleToggle}
-          className="absolute -right-3 top-1/2 transform -translate-y-1/2 bg-white dark:bg-gray-800 rounded-full shadow border border-gray-300 dark:border-gray-600 w-5 h-5 flex items-center justify-center text-gray-500 hover:text-primary hover:border-primary z-20 transition-transform hover:scale-110"
+          className={`absolute ${isLeft ? '-left-3' : '-right-3'} top-1/2 transform -translate-y-1/2 bg-white dark:bg-gray-800 rounded-full shadow border border-gray-300 dark:border-gray-600 w-5 h-5 flex items-center justify-center text-gray-500 hover:text-primary hover:border-primary z-20 transition-transform hover:scale-110`}
           title={node.isExpanded !== false ? "Collapse" : "Expand"}
         >
            {node.isExpanded !== false ? <Minus size={10} /> : <Plus size={10} />}

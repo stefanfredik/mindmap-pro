@@ -1,5 +1,4 @@
 
-
 import { MindMapNode, Position, MindMapTheme, LayoutType, MindMapData } from './types';
 import { DEFAULT_NODE_STYLE } from './constants';
 
@@ -377,6 +376,8 @@ const layoutMindMap = (nodes: MindMapNode[]): MindMapNode[] => {
     const children = childrenMap.get(nodeId) || [];
     
     node.position = { x, y: yCenter };
+    // Explicitly set layoutSide so UI components know which side the node is on
+    node.layoutSide = direction === -1 ? 'left' : 'right';
 
     if (node.isExpanded !== false && children.length > 0) {
       let currentY = yCenter - (subtreeSizes.get(nodeId)! / 2); // Start at top of subtree area

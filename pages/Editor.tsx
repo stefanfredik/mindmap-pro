@@ -1,5 +1,4 @@
 
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { 
   ArrowLeft, Download, Upload, Plus, Minus, Type, Palette, 
@@ -192,30 +191,68 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
   };
 
   const handleMouseUp = () => {
-    // Handle Node Drag Drop - Side Switching Logic
+    // Handle Node Drag Drop with Sorting/Reordering Logic
     if (isDraggingNode && draggedNodeId && currentLayout === 'mindmap') {
-        const draggedNode = nodes.find(n => n.id === draggedNodeId);
-        const rootNode = nodes.find(n => !n.parentId);
-        
-        // Only apply side switching logic if:
-        // 1. We found the dragged node
-        // 2. We found the root node
-        // 3. The dragged node is a direct child of the root node (Level 1)
-        if (draggedNode && rootNode && draggedNode.parentId === rootNode.id) {
-             const side: 'left' | 'right' = draggedNode.position.x < rootNode.position.x ? 'left' : 'right';
-             
-             // If side has changed, update it and re-layout
-             if (draggedNode.layoutSide !== side) {
-                 setNodes(prev => {
-                     const updated = prev.map(n => n.id === draggedNodeId ? { ...n, layoutSide: side } : n);
-                     return autoLayout(updated, currentLayout);
-                 });
-             } else {
-                 // Even if side didn't change, we should snap back to auto layout to clean up alignment
-                 setNodes(prev => autoLayout(prev, currentLayout));
-             }
+        const draggedNodeIndex = nodes.findIndex(n => n.id === draggedNodeId);
+        if (draggedNodeIndex !== -1) {
+            const draggedNode = nodes[draggedNodeIndex];
+            const rootNode = nodes.find(n => !n.parentId);
+
+            let newNodes = [...nodes];
+            let side: 'left' | 'right' | undefined = draggedNode.layoutSide;
+
+            // 1. Determine Side (Left/Right) for Root Children based on drop X
+            if (rootNode && draggedNode.parentId === rootNode.id) {
+                side = draggedNode.position.x < rootNode.position.x ? 'left' : 'right';
+                // Update the dragged node in our temp array with new side
+                newNodes[draggedNodeIndex] = { ...draggedNode, layoutSide: side };
+            }
+
+            // 2. Vertical Reordering based on drop Y
+            if (draggedNode.parentId) {
+                const parentId = draggedNode.parentId;
+                const nodeToReorder = newNodes[draggedNodeIndex]; // The dragged node with updated properties
+
+                // Get all relevant siblings (same parent) that we want to sort against
+                const siblingsToReorder = newNodes.filter(n => {
+                    if (n.parentId !== parentId) return false; // Must share parent
+                    
+                    // If root child, must also share the same Side (Left/Right)
+                    if (rootNode && parentId === rootNode.id) {
+                        return n.layoutSide === nodeToReorder.layoutSide;
+                    }
+                    return true;
+                });
+
+                // Sort these siblings based on their current Y position.
+                // Note: The 'draggedNode' currently has the Y position of the mouse release (drop point),
+                // while other nodes have their calculated layout positions.
+                // This allows us to insert the dragged node exactly where the user dropped it vertically.
+                siblingsToReorder.sort((a, b) => a.position.y - b.position.y);
+
+                // Reconstruct the nodes array to reflect this new order.
+                // We keep non-involved nodes in place, and insert the sorted siblings block.
+                
+                // Find where to insert the block (first occurrence of any sibling)
+                const firstSiblingIndex = newNodes.findIndex(n => siblingsToReorder.some(s => s.id === n.id));
+                const nodesWithoutSiblings = newNodes.filter(n => !siblingsToReorder.some(s => s.id === n.id));
+                
+                if (firstSiblingIndex !== -1) {
+                     const finalNodes = [
+                        ...nodesWithoutSiblings.slice(0, firstSiblingIndex),
+                        ...siblingsToReorder,
+                        ...nodesWithoutSiblings.slice(firstSiblingIndex)
+                    ];
+                    setNodes(autoLayout(finalNodes, currentLayout));
+                } else {
+                    // Fallback
+                    setNodes(autoLayout(newNodes, currentLayout));
+                }
+            } else {
+                // Root node moved, just layout
+                setNodes(prev => autoLayout(prev, currentLayout));
+            }
         } else {
-             // For all other nodes, just snap back to layout
              setNodes(prev => autoLayout(prev, currentLayout));
         }
     } else if (isDraggingNode) {
