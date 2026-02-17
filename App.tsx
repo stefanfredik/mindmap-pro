@@ -11,7 +11,13 @@ import { generateId, applyTheme } from './utils';
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<Page>(Page.LANDING);
   const [currentMapId, setCurrentMapId] = useState<string | null>(null);
-  const [mindMaps, setMindMaps] = useState<MindMapData[]>([SAMPLE_MINDMAP]);
+  
+  // Initialize state from localStorage
+  const [mindMaps, setMindMaps] = useState<MindMapData[]>(() => {
+    const saved = localStorage.getItem('mindmaps');
+    return saved ? JSON.parse(saved) : [SAMPLE_MINDMAP];
+  });
+  
   const [theme, setTheme] = useState<ThemeMode>(ThemeMode.LIGHT);
 
   // Initialize Theme
@@ -28,6 +34,11 @@ const App: React.FC = () => {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  // Persist MindMaps
+  useEffect(() => {
+    localStorage.setItem('mindmaps', JSON.stringify(mindMaps));
+  }, [mindMaps]);
 
   const toggleTheme = () => {
     setTheme(prev => prev === ThemeMode.LIGHT ? ThemeMode.DARK : ThemeMode.LIGHT);
@@ -56,12 +67,12 @@ const App: React.FC = () => {
       title: "New Mind Map",
       themeId: DEFAULT_THEME_ID,
       layout: 'mindmap',
-      nodes: initialNodes, // applyTheme not strictly needed for single root if style manually set, but Editor will apply it on mount
+      nodes: initialNodes, 
       connections: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    setMindMaps([...mindMaps, newMap]);
+    setMindMaps(prev => [...prev, newMap]);
     setCurrentMapId(newMap.id);
     setCurrentPage(Page.EDITOR);
   };
@@ -73,6 +84,10 @@ const App: React.FC = () => {
 
   const handleDeleteMap = (id: string) => {
     setMindMaps(prev => prev.filter(m => m.id !== id));
+    if (currentMapId === id) {
+      setCurrentMapId(null);
+      setCurrentPage(Page.DASHBOARD);
+    }
   };
 
   const handleSaveMap = (updatedMap: MindMapData) => {
