@@ -10,6 +10,7 @@ interface NodeComponentProps {
   isConnecting?: boolean; // Is the global app in connecting mode?
   showHandles?: boolean; // Show the 4 directional connection handles?
   isTarget?: boolean; // Is this node the potential target?
+  isDragging?: boolean; // Is this specific node being dragged?
   onSelect: (id: string) => void;
   onDragStart: (e: React.MouseEvent, id: string) => void;
   onUpdate: (id: string, content: string) => void;
@@ -26,6 +27,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
   isConnecting,
   showHandles,
   isTarget,
+  isDragging,
   onSelect,
   onDragStart,
   onUpdate,
@@ -44,6 +46,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
       // Reset height and grow
       inputRef.current.style.height = 'auto';
       inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+      // Select all text only on initial edit entry
       inputRef.current.select();
     }
   }, [isEditing]);
@@ -69,6 +72,8 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
       e.preventDefault();
       setIsEditing(false);
     }
+    // Stop propagation to prevent global shortcuts (like Space/Delete) triggering on the node while editing text
+    e.stopPropagation();
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -77,6 +82,13 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // CRITICAL: If we are editing, do NOT trigger drag start on the container.
+    // This allows mouse interactions inside the textarea to work correctly (selecting text, moving cursor).
+    if (isEditing) {
+        e.stopPropagation();
+        return;
+    }
+
     // Only trigger drag if not connecting and not right-click
     if (!isConnecting && e.button !== 2) {
       onDragStart(e, node.id);
@@ -119,7 +131,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
   return (
     <div
       ref={nodeRef}
-      className={`absolute transition-all duration-75 ease-out group flex items-center justify-center cursor-grab active:cursor-grabbing`}
+      className={`absolute transition-all duration-75 ease-out group flex items-center justify-center ${isDragging ? 'pointer-events-none opacity-80' : ''} ${isEditing ? 'cursor-text' : 'cursor-grab active:cursor-grabbing'}`}
       style={{
         left: node.position.x,
         top: node.position.y,
@@ -158,7 +170,9 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
             onChange={handleInput}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-            onMouseDown={(e) => e.stopPropagation()} // Stop drag propagation when editing text
+            onMouseDown={(e) => e.stopPropagation()} // Stop drag propagation
+            onClick={(e) => e.stopPropagation()} // Stop click propagation
+            onDoubleClick={(e) => e.stopPropagation()} // Stop double click propagation to prevent resetting selection
             className="w-full h-full bg-transparent outline-none resize-none overflow-hidden text-center cursor-text"
             style={{ 
               color: node.style.color,
@@ -184,7 +198,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
         <button
           onClick={handleToggle}
           onMouseDown={(e) => e.stopPropagation()} // Prevent drag trigger
-          className={`absolute ${isLeft ? '-left-3' : '-right-3'} top-1/2 transform -translate-y-1/2 bg-white dark:bg-gray-800 rounded-full shadow border border-gray-300 dark:border-gray-600 w-5 h-5 flex items-center justify-center text-gray-500 hover:text-primary hover:border-primary z-20 transition-transform hover:scale-110 cursor-pointer`}
+          className={`absolute ${isLeft ? '-left-3' : '-right-3'} top-1/2 transform -translate-y-1/2 bg-white dark:bg-gray-800 rounded-full shadow border border-gray-300 dark:border-gray-600 w-5 h-5 flex items-center justify-center text-gray-500 hover:text-primary hover:border-primary z-20 transition-transform hover:scale-110 cursor-pointer pointer-events-auto`}
           title={node.isExpanded !== false ? "Collapse" : "Expand"}
         >
            {node.isExpanded !== false ? <Minus size={10} /> : <Plus size={10} />}
@@ -208,7 +222,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                 // Root Node: Show Left and Right Add Buttons
                 <>
                     <button 
-                        className="absolute top-1/2 -right-8 transform -translate-y-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
+                        className="absolute top-1/2 -right-8 transform -translate-y-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800 pointer-events-auto"
                         onClick={(e) => { e.stopPropagation(); onAddChild(node.id, 'right'); }}
                         onMouseDown={(e) => e.stopPropagation()}
                         title="Add Child (Right)"
@@ -216,7 +230,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                         <Plus size={14} strokeWidth={3} />
                     </button>
                     <button 
-                        className="absolute top-1/2 -left-8 transform -translate-y-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
+                        className="absolute top-1/2 -left-8 transform -translate-y-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800 pointer-events-auto"
                         onClick={(e) => { e.stopPropagation(); onAddChild(node.id, 'left'); }}
                         onMouseDown={(e) => e.stopPropagation()}
                         title="Add Child (Left)"
@@ -227,7 +241,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
             ) : (
                 // Normal Node: Show Bottom Add Button
                 <button 
-                    className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800"
+                    className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 z-30 flex items-center justify-center w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-transform hover:scale-110 border-2 border-white dark:border-gray-800 pointer-events-auto"
                     onClick={handleAddChild}
                     onMouseDown={(e) => e.stopPropagation()}
                     title="Add Child Node"

@@ -94,6 +94,7 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
   // Node Dragging State
   const [isDraggingNode, setIsDraggingNode] = useState(false);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+  const [potentialDrag, setPotentialDrag] = useState<{ id: string, start: Position } | null>(null);
   
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -168,6 +169,19 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
       setDragStart({ x: e.clientX, y: e.clientY });
     }
 
+    // Check for drag threshold for nodes
+    if (potentialDrag) {
+        const dist = Math.sqrt(Math.pow(e.clientX - potentialDrag.start.x, 2) + Math.pow(e.clientY - potentialDrag.start.y, 2));
+        if (dist > 5) {
+            setIsDraggingNode(true);
+            setDraggedNodeId(potentialDrag.id);
+            setPotentialDrag(null);
+            // Reset drag start to current position to avoid jump, or use original for precision.
+            // Using current ensures smooth pick up.
+            setDragStart({ x: e.clientX, y: e.clientY }); 
+        }
+    }
+
     if (isDraggingNode && draggedNodeId) {
       const dx = (e.clientX - dragStart.x) / viewport.scale;
       const dy = (e.clientY - dragStart.y) / viewport.scale;
@@ -190,74 +204,100 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     }
   };
 
+  // Check if targetId is a descendant of sourceId to prevent circular dependency
+  const isDescendant = (sourceId: string, targetId: string, currentNodes: MindMapNode[]): boolean => {
+      let current = currentNodes.find(n => n.id === targetId);
+      while (current && current.parentId) {
+          if (current.parentId === sourceId) return true;
+          current = currentNodes.find(n => n.id === current?.parentId);
+      }
+      return false;
+  };
+
   const handleMouseUp = () => {
-    // Handle Node Drag Drop with Sorting/Reordering Logic
-    if (isDraggingNode && draggedNodeId && currentLayout === 'mindmap') {
-        const draggedNodeIndex = nodes.findIndex(n => n.id === draggedNodeId);
-        if (draggedNodeIndex !== -1) {
-            const draggedNode = nodes[draggedNodeIndex];
-            const rootNode = nodes.find(n => !n.parentId);
+    setPotentialDrag(null); // Clear potential drag
 
-            let newNodes = [...nodes];
-            let side: 'left' | 'right' | undefined = draggedNode.layoutSide;
-
-            // 1. Determine Side (Left/Right) for Root Children based on drop X
-            if (rootNode && draggedNode.parentId === rootNode.id) {
-                side = draggedNode.position.x < rootNode.position.x ? 'left' : 'right';
-                // Update the dragged node in our temp array with new side
-                newNodes[draggedNodeIndex] = { ...draggedNode, layoutSide: side };
-            }
-
-            // 2. Vertical Reordering based on drop Y
-            if (draggedNode.parentId) {
-                const parentId = draggedNode.parentId;
-                const nodeToReorder = newNodes[draggedNodeIndex]; // The dragged node with updated properties
-
-                // Get all relevant siblings (same parent) that we want to sort against
-                const siblingsToReorder = newNodes.filter(n => {
-                    if (n.parentId !== parentId) return false; // Must share parent
-                    
-                    // If root child, must also share the same Side (Left/Right)
-                    if (rootNode && parentId === rootNode.id) {
-                        return n.layoutSide === nodeToReorder.layoutSide;
+    // Handle Node Drag Drop with Sorting/Reordering OR Reparenting Logic
+    if (isDraggingNode && draggedNodeId) {
+        const draggedNode = nodes.find(n => n.id === draggedNodeId);
+        
+        // --- 1. Reparenting Logic (Drop on another node) ---
+        if (hoveredNodeId && hoveredNodeId !== draggedNodeId && draggedNode) {
+            // Validate: Prevent circular dependency (cannot drop parent into its own child)
+            if (!isDescendant(draggedNodeId, hoveredNodeId, nodes)) {
+                // Update Parent ID
+                const updatedNodes = nodes.map(n => {
+                    if (n.id === draggedNodeId) {
+                        return { ...n, parentId: hoveredNodeId, layoutSide: undefined }; // Reset layout side on reparent
                     }
-                    return true;
+                    if (n.id === hoveredNodeId) {
+                        return { ...n, isExpanded: true }; // Ensure new parent is expanded
+                    }
+                    return n;
                 });
-
-                // Sort these siblings based on their current Y position.
-                // Note: The 'draggedNode' currently has the Y position of the mouse release (drop point),
-                // while other nodes have their calculated layout positions.
-                // This allows us to insert the dragged node exactly where the user dropped it vertically.
-                siblingsToReorder.sort((a, b) => a.position.y - b.position.y);
-
-                // Reconstruct the nodes array to reflect this new order.
-                // We keep non-involved nodes in place, and insert the sorted siblings block.
                 
-                // Find where to insert the block (first occurrence of any sibling)
-                const firstSiblingIndex = newNodes.findIndex(n => siblingsToReorder.some(s => s.id === n.id));
-                const nodesWithoutSiblings = newNodes.filter(n => !siblingsToReorder.some(s => s.id === n.id));
-                
-                if (firstSiblingIndex !== -1) {
-                     const finalNodes = [
-                        ...nodesWithoutSiblings.slice(0, firstSiblingIndex),
-                        ...siblingsToReorder,
-                        ...nodesWithoutSiblings.slice(firstSiblingIndex)
-                    ];
-                    setNodes(autoLayout(finalNodes, currentLayout));
-                } else {
-                    // Fallback
-                    setNodes(autoLayout(newNodes, currentLayout));
-                }
+                // Re-apply theme to ensure styles match new hierarchy
+                const themedNodes = applyTheme(updatedNodes, currentTheme);
+                setNodes(autoLayout(themedNodes, currentLayout));
             } else {
-                // Root node moved, just layout
+                // Invalid drop (circular), just layout back to original spot
                 setNodes(prev => autoLayout(prev, currentLayout));
             }
+        } 
+        // --- 2. Reordering / Side Switching Logic (Drop in empty space) ---
+        else if (currentLayout === 'mindmap' && draggedNode) {
+             const draggedNodeIndex = nodes.findIndex(n => n.id === draggedNodeId);
+             
+             if (draggedNodeIndex !== -1) {
+                const rootNode = nodes.find(n => !n.parentId);
+
+                let newNodes = [...nodes];
+                let side: 'left' | 'right' | undefined = draggedNode.layoutSide;
+
+                // Determine Side (Left/Right) for Root Children based on drop X
+                if (rootNode && draggedNode.parentId === rootNode.id) {
+                    side = draggedNode.position.x < rootNode.position.x ? 'left' : 'right';
+                    newNodes[draggedNodeIndex] = { ...draggedNode, layoutSide: side };
+                }
+
+                // Vertical Reordering
+                if (draggedNode.parentId) {
+                    const parentId = draggedNode.parentId;
+                    const nodeToReorder = newNodes[draggedNodeIndex];
+
+                    const siblingsToReorder = newNodes.filter(n => {
+                        if (n.parentId !== parentId) return false;
+                        if (rootNode && parentId === rootNode.id) {
+                            return n.layoutSide === nodeToReorder.layoutSide;
+                        }
+                        return true;
+                    });
+
+                    siblingsToReorder.sort((a, b) => a.position.y - b.position.y);
+
+                    const firstSiblingIndex = newNodes.findIndex(n => siblingsToReorder.some(s => s.id === n.id));
+                    const nodesWithoutSiblings = newNodes.filter(n => !siblingsToReorder.some(s => s.id === n.id));
+                    
+                    if (firstSiblingIndex !== -1) {
+                         const finalNodes = [
+                            ...nodesWithoutSiblings.slice(0, firstSiblingIndex),
+                            ...siblingsToReorder,
+                            ...nodesWithoutSiblings.slice(firstSiblingIndex)
+                        ];
+                        setNodes(autoLayout(finalNodes, currentLayout));
+                    } else {
+                        setNodes(autoLayout(newNodes, currentLayout));
+                    }
+                } else {
+                    setNodes(prev => autoLayout(prev, currentLayout));
+                }
+            } else {
+                 setNodes(prev => autoLayout(prev, currentLayout));
+            }
         } else {
-             setNodes(prev => autoLayout(prev, currentLayout));
+            // Snap back for other layouts
+            setNodes(prev => autoLayout(prev, currentLayout));
         }
-    } else if (isDraggingNode) {
-        // Snap back for other layouts too
-        setNodes(prev => autoLayout(prev, currentLayout));
     }
 
 
@@ -289,6 +329,9 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     setIsDraggingCanvas(false);
     setIsDraggingNode(false);
     setDraggedNodeId(null);
+    if (!connectionDrag) {
+        setHoveredNodeId(null); // Clear hover if not connecting
+    }
   };
 
   // -- Node Management --
@@ -357,9 +400,9 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
 
   const handleNodeDragStart = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setIsDraggingNode(true);
-    setDraggedNodeId(id);
-    setDragStart({ x: e.clientX, y: e.clientY });
+    // Start tracking potential drag, do NOT set isDraggingNode immediately.
+    setPotentialDrag({ id, start: { x: e.clientX, y: e.clientY } });
+    
     setSelectedNodeId(id);
     setConnectingNodeId(null);
   };
@@ -509,7 +552,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     }
   };
   
-  // Direct click on label to edit
   const handleLabelClick = (e: React.MouseEvent, id: string, currentLabel: string) => {
      e.stopPropagation();
      const newLabel = prompt("Edit Label:", currentLabel);
@@ -538,7 +580,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
      });
   };
 
-  // Export Logic
   const getCurrentMapData = (): MindMapData => ({
       ...data,
       title: title, 
@@ -571,19 +612,17 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
   const handleExportImage = async () => {
       setIsExporting(true);
       try {
-          // Deselect everything for a clean shot
           setSelectedNodeId(null);
           setSelectedConnectionId(null);
           
-          // Wait for render cycle
           await new Promise(resolve => setTimeout(resolve, 100));
 
           const element = document.getElementById('canvas-bg');
           if (element) {
               const canvas = await html2canvas(element, {
-                  scale: 2, // Better quality
+                  scale: 2, 
                   useCORS: true,
-                  backgroundColor: currentTheme.background.startsWith('#') ? currentTheme.background : '#ffffff', // Fallback for complex gradients if needed
+                  backgroundColor: currentTheme.background.startsWith('#') ? currentTheme.background : '#ffffff', 
                   ignoreElements: (element) => element.classList.contains('node-toolbar') || element.classList.contains('rich-text-editor-container')
               });
               
@@ -601,7 +640,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
           setShowExportModal(false);
       }
   };
-
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -627,7 +665,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     e.target.value = '';
   };
 
-  // Share Functionality
   const handleTogglePublic = () => {
     setIsPublic(!isPublic);
   };
@@ -639,7 +676,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     });
   };
 
-  // Collaboration Logic
   const handleInvite = () => {
       if (!inviteEmail || !inviteEmail.includes('@')) return;
       if (!collaborators.includes(inviteEmail)) {
@@ -688,159 +724,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [addNode, addSibling, deleteNode, toggleNodeExpansion, selectedNodeId, selectedConnectionId]);
 
-  const renderConnections = () => {
-    return visibleNodes.map(node => {
-      if (!node.parentId) return null;
-      const parent = visibleNodes.find(n => n.id === node.parentId);
-      if (!parent) return null;
-      
-      const { path, center } = getConnectionPath(parent, node, currentLayout);
-
-      return (
-        <g key={`${parent.id}-${node.id}`}>
-            <path
-              d={path}
-              stroke={currentTheme.lineColor}
-              strokeWidth="2"
-              fill="none"
-            />
-        </g>
-      );
-    });
-  };
-
-  const renderCrossLinks = () => {
-      return connections.map(conn => {
-          const source = nodes.find(n => n.id === conn.sourceId);
-          const target = nodes.find(n => n.id === conn.targetId);
-          
-          if (!source || !target) return null;
-          const isSourceVisible = visibleNodes.some(n => n.id === source.id);
-          const isTargetVisible = visibleNodes.some(n => n.id === target.id);
-          
-          if (!isSourceVisible || !isTargetVisible) return null;
-
-          const { path, center } = getCrossLinkPath(source, target);
-          const isSelected = selectedConnectionId === conn.id;
-          const isHovered = hoveredConnectionId === conn.id;
-
-          // Determine color based on state
-          // Selected: Blue (#3b82f6)
-          // Hovered:  Amber/Orange (#f59e0b) - Distinct change
-          // Default:  Slate 500 (#64748b)
-          const strokeColor = isSelected ? '#3b82f6' : (isHovered ? '#f59e0b' : '#64748b');
-          
-          // Determine marker
-          let markerUrl = 'url(#arrowhead-manual)';
-          if (isSelected) markerUrl = 'url(#arrowhead-selected)';
-          else if (isHovered) markerUrl = 'url(#arrowhead-hover)';
-
-          return (
-              <g 
-                key={conn.id} 
-                data-connection-id={conn.id}
-                onClick={(e) => { 
-                    e.stopPropagation(); 
-                    setSelectedConnectionId(conn.id); 
-                }}
-                onMouseEnter={() => setHoveredConnectionId(conn.id)}
-                onMouseLeave={() => setHoveredConnectionId(null)}
-                className="cursor-pointer group pointer-events-auto"
-              >
-                  {/* Invisible wide stroke for easier clicking */}
-                  <path 
-                    d={path}
-                    stroke="transparent"
-                    strokeWidth="20"
-                    fill="none"
-                    className="pointer-events-auto"
-                  />
-                  {/* Actual visible line */}
-                  <path
-                    d={path}
-                    stroke={strokeColor}
-                    strokeWidth={isSelected || isHovered ? "2.5" : "2"}
-                    fill="none"
-                    strokeDasharray={isSelected || isHovered ? "none" : "5,5"}
-                    markerEnd={markerUrl}
-                    className="transition-all duration-200 pointer-events-none"
-                  />
-                  {/* Label */}
-                  {conn.label && (
-                      <g 
-                        className="pointer-events-auto cursor-text hover:scale-105 transition-transform"
-                        onClick={(e) => handleLabelClick(e, conn.id, conn.label!)}
-                      >
-                          <rect 
-                            x={center.x - (conn.label.length * 4) - 4} 
-                            y={center.y - 10} 
-                            width={(conn.label.length * 8) + 8} 
-                            height="20" 
-                            rx="4" 
-                            fill="white"
-                            stroke={strokeColor}
-                            strokeWidth="1"
-                            className="drop-shadow-sm"
-                          />
-                          <text 
-                            x={center.x} 
-                            y={center.y} 
-                            dy="4" 
-                            textAnchor="middle" 
-                            fontSize="12" 
-                            fill={strokeColor}
-                            className="font-medium select-none"
-                          >
-                            {conn.label}
-                          </text>
-                      </g>
-                  )}
-              </g>
-          );
-      });
-  };
-  
-  const renderTempConnection = () => {
-      if (!connectionDrag) return null;
-      const source = nodes.find(n => n.id === connectionDrag.sourceId);
-      if (!source) return null;
-
-      const sx = source.position.x;
-      const sy = source.position.y;
-      
-      let ex, ey;
-
-      if (hoveredNodeId && hoveredNodeId !== source.id) {
-          const target = nodes.find(n => n.id === hoveredNodeId);
-          if (target) {
-              ex = target.position.x;
-              ey = target.position.y;
-          } else {
-             ex = (connectionDrag.currentPos.x - viewport.x) / viewport.scale;
-             ey = (connectionDrag.currentPos.y - viewport.y) / viewport.scale;
-          }
-      } else {
-          ex = (connectionDrag.currentPos.x - viewport.x) / viewport.scale;
-          ey = (connectionDrag.currentPos.y - viewport.y) / viewport.scale;
-      }
-
-      const isInvalid = hoveredNodeId === source.id;
-      const strokeColor = isInvalid ? '#ef4444' : '#64748b';
-
-      return (
-          <g>
-            <line 
-                x1={sx} y1={sy} x2={ex} y2={ey} 
-                stroke={strokeColor} 
-                strokeWidth="2" 
-                strokeDasharray="5,5"
-                markerEnd="url(#arrowhead-manual)"
-                className="pointer-events-none opacity-80"
-            />
-          </g>
-      );
-  };
-
   const selectedNode = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) : null;
   const noteEditingNode = editingNoteNodeId ? nodes.find(n => n.id === editingNoteNodeId) : null;
 
@@ -861,7 +744,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
       return { x: screenX + (nodeWidth / 2) + 20, y: screenY - (nodeHeight / 2) };
   }, [noteEditingNode, viewport]);
 
-  // Context Menu Position for Selected Connection
   const connectionMenuPos = useMemo(() => {
       if (!selectedConnectionId) return null;
       const conn = connections.find(c => c.id === selectedConnectionId);
@@ -877,6 +759,129 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
       };
   }, [selectedConnectionId, connections, nodes, viewport]);
 
+  const renderConnections = () => {
+    return visibleNodes.map(node => {
+      if (!node.parentId) return null;
+      const parent = visibleNodes.find(n => n.id === node.parentId);
+      if (!parent) return null;
+
+      const { path } = getConnectionPath(parent, node, currentLayout);
+      return (
+        <path
+          key={`conn-${node.id}`}
+          d={path}
+          stroke={currentTheme.lineColor}
+          strokeWidth="2"
+          fill="none"
+        />
+      );
+    });
+  };
+
+  const renderCrossLinks = () => {
+    return connections.map(conn => {
+        const source = nodes.find(n => n.id === conn.sourceId);
+        const target = nodes.find(n => n.id === conn.targetId);
+
+        if (!source || !target) return null;
+
+        // Visibility check
+        const isSourceVisible = visibleNodes.some(n => n.id === source.id);
+        const isTargetVisible = visibleNodes.some(n => n.id === target.id);
+
+        if (!isSourceVisible || !isTargetVisible) return null;
+
+        const { path, center } = getCrossLinkPath(source, target);
+        const isSelected = selectedConnectionId === conn.id;
+        const isHovered = hoveredConnectionId === conn.id;
+
+        return (
+            <g 
+                key={conn.id} 
+                className="group cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); setSelectedConnectionId(conn.id); }}
+                onMouseEnter={() => setHoveredConnectionId(conn.id)}
+                onMouseLeave={() => setHoveredConnectionId(null)}
+                data-connection-id={conn.id}
+            >
+                {/* Hit area */}
+                <path d={path} stroke="transparent" strokeWidth="15" fill="none" />
+                
+                {/* Visible line */}
+                <path 
+                    d={path} 
+                    stroke={isSelected ? '#3b82f6' : (isHovered ? '#f59e0b' : '#64748b')} 
+                    strokeWidth={isSelected ? 3 : 2} 
+                    strokeDasharray="5,5"
+                    fill="none" 
+                    markerEnd={isSelected ? "url(#arrowhead-selected)" : (isHovered ? "url(#arrowhead-hover)" : "url(#arrowhead-manual)")}
+                />
+
+                {/* Label */}
+                {conn.label && (
+                    <g 
+                        transform={`translate(${center.x}, ${center.y})`}
+                        onClick={(e) => handleLabelClick(e, conn.id, conn.label!)}
+                    >
+                         <rect 
+                            x={-(conn.label.length * 3 + 8)} 
+                            y="-10" 
+                            width={conn.label.length * 6 + 16} 
+                            height="20" 
+                            rx="4" 
+                            fill="white" 
+                            stroke={isSelected ? "#3b82f6" : "#e2e8f0"} 
+                        />
+                        <text 
+                            x="0" 
+                            y="4" 
+                            textAnchor="middle" 
+                            fontSize="11" 
+                            fill="#64748b"
+                            className="select-none font-medium"
+                        >
+                            {conn.label}
+                        </text>
+                    </g>
+                )}
+            </g>
+        );
+    });
+  };
+
+  const renderTempConnection = () => {
+    if (!connectionDrag) return null;
+    
+    const sourceNode = nodes.find(n => n.id === connectionDrag.sourceId);
+    if (!sourceNode) return null;
+
+    // Convert screen coordinates to canvas coordinates
+    const targetX = (connectionDrag.currentPos.x - viewport.x) / viewport.scale;
+    const targetY = (connectionDrag.currentPos.y - viewport.y) / viewport.scale;
+
+    const tempTarget: MindMapNode = {
+        id: 'temp',
+        parentId: null,
+        content: '',
+        position: { x: targetX, y: targetY },
+        style: DEFAULT_NODE_STYLE
+    };
+
+    const { path } = getCrossLinkPath(sourceNode, tempTarget);
+
+    return (
+        <path 
+            d={path} 
+            stroke="#3b82f6" 
+            strokeWidth="2" 
+            strokeDasharray="5,5" 
+            fill="none" 
+            markerEnd="url(#arrowhead-selected)"
+            className="pointer-events-none opacity-70"
+        />
+    );
+  };
+
   return (
     <div className={`h-screen flex flex-col overflow-hidden bg-gray-50 dark:bg-gray-900 ${connectionDrag ? 'cursor-crosshair' : ''}`}>
       <header className="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-20 shadow-sm">
@@ -885,7 +890,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
             <ArrowLeft size={20} className="text-gray-600 dark:text-gray-300" />
           </button>
           
-          {/* Editable Title */}
           {isEditingTitle ? (
               <input 
                   autoFocus
@@ -980,7 +984,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
                 <input type="file" accept=".json" className="hidden" onChange={handleImport} />
             </label>
             
-            {/* Export Button & Menu */}
             <div className="relative">
                 <button 
                     onClick={() => setShowExportModal(!showExportModal)}
@@ -989,7 +992,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
                 >
                     <Download size={20} />
                 </button>
-                {/* Export Modal/Dropdown */}
                 {showExportModal && (
                     <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden z-50 flex flex-col animate-in fade-in slide-in-from-top-2">
                          <div className="p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
@@ -1123,7 +1125,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
                       </div>
                       <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded">Owner</span>
                   </div>
-                  
                   {collaborators.map((email) => (
                       <div key={email} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors group">
                           <div className="flex items-center gap-3">
@@ -1141,7 +1142,6 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
                           </button>
                       </div>
                   ))}
-                  
                   {collaborators.length === 0 && (
                       <div className="text-center py-4 text-xs text-gray-400">
                           No collaborators yet. Invite someone above!
@@ -1332,6 +1332,7 @@ export const Editor: React.FC<EditorProps> = ({ data, onSave, onBack }) => {
                             isConnecting={!!connectionDrag}
                             showHandles={connectingNodeId === node.id}
                             isTarget={hoveredNodeId === node.id && connectionDrag?.sourceId !== node.id}
+                            isDragging={isDraggingNode && draggedNodeId === node.id}
                             onSelect={handleNodeClick}
                             onDragStart={handleNodeDragStart}
                             onUpdate={updateNodeContent}
